@@ -13,10 +13,10 @@ var ambientLight = new THREE.AmbientLight( 0x404040 ); // soft white light
 scene.add( ambientLight );
 
 
-var directionalLight = new THREE.DirectionalLight( 0xffffff, 0.5 );
-directionalLight.position.set(0, 10, 0); // set the light direction
-directionalLight.castShadow = true; // enable shadow for the light
-scene.add( directionalLight );
+// var directionalLight = new THREE.DirectionalLight( 0xffffff, 0.5 );
+// directionalLight.position.set(0, 10, 0); // set the light direction
+// directionalLight.castShadow = true; // enable shadow for the light
+// scene.add( directionalLight );
 
 
 // Camera
