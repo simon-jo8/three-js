@@ -8,7 +8,8 @@ const sizes = {
     height: window.innerHeight
 }
 const canvas = document.querySelector('#three');
-
+let rotationSpeed = 0.0002;
+let orbitRadius = 3;
 // LIGHT
 // var ambientLight = new THREE.AmbientLight( 0x404040 ); // soft white light
 // scene.add( ambientLight );
@@ -96,12 +97,21 @@ renderer.setSize( sizes.width, sizes.height );
 function animate() {
     requestAnimationFrame( animate );
 
-
     sphere1.rotation.x += 0.01;
     sphere1.rotation.y += 0.01;
 
     sphere3.rotation.x += 0.01;
     sphere3.rotation.y += 0.01;
+
+    let time = Date.now() * rotationSpeed;
+
+    sphere1.position.x = sphere2.position.x + orbitRadius * Math.sin(time);
+    sphere1.position.z = sphere2.position.z + orbitRadius * Math.cos(time);
+
+    sphere3.position.x = sphere2.position.x + orbitRadius * Math.sin(time + Math.PI);
+    sphere3.position.z = sphere2.position.z + orbitRadius * Math.cos(time + Math.PI);
+
+
 
     controls.update();
     renderer.render( scene, camera );
