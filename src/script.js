@@ -1,12 +1,19 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import vertex from "./vertex.glsl"
+import fragment from "./fragment.glsl"
 
 const scene = new THREE.Scene();
 const sizes = {
     width: window.innerWidth,
     height: window.innerHeight
 }
+let speed = 0.05; // speed of the camera
+let loopLength = 50; // length of the loop, should be less than or equal to plane size
+
+scene.background = new THREE.Color( 0xF5F5DC );
 const canvas = document.querySelector('#three');
+scene.fog = new THREE.Fog(0xF5F5DC, 1, 50);  // color, near, far
 
 // LIGHT
 var ambientLight = new THREE.AmbientLight( 0x404040 ); // soft white light
@@ -21,14 +28,28 @@ scene.add( directionalLight );
 
 // Camera
 var camera = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 0.1, 1000 );
-camera.position.set(0, 10, 10);
+camera.position.set(5, 5, 5);
 camera.lookAt(0, 0, 0);
 
 
 
 // Plane
-var geometry = new THREE.PlaneGeometry( 10, 10 );
-var material = new THREE.MeshStandardMaterial( { color: 0x00ff00, side: THREE.DoubleSide } );
+var geometry = new THREE.PlaneGeometry( 100, 100 ,100,100);
+
+
+var material = new THREE.ShaderMaterial({
+    vertexShader: vertex,
+    fragmentShader: fragment,
+    wireframe: false,
+    side: THREE.DoubleSide,
+    uniforms: {
+        fogColor: { value: scene.fog.color },
+        fogNear: { value: scene.fog.near },
+        fogFar: { value: scene.fog.far },
+    }
+});
+
+
 var plane = new THREE.Mesh( geometry, material );
 plane.receiveShadow = true; // enable shadow for the plane
 plane.rotation.x = Math.PI / 2;
@@ -37,24 +58,6 @@ plane.rotation.x = Math.PI / 2;
 scene.add( plane );
 
 // SPHERE
-
-var sphereGeometry = new THREE.SphereGeometry( 1, 32, 32 );
-
-var sphere1 = new THREE.Mesh( sphereGeometry, new THREE.MeshStandardMaterial( { color: 0xff0000 } ) );
-sphere1.position.set(-3, 2, 0);
-sphere1.castShadow = true;
-scene.add( sphere1 );
-
-var sphere2 = new THREE.Mesh( sphereGeometry, new THREE.MeshStandardMaterial( { color: 0x00ff00 } ) );
-sphere2.position.set(0, 1, 0);
-sphere2.castShadow = true;
-scene.add( sphere2 );
-
-var sphere3 = new THREE.Mesh( sphereGeometry, new THREE.MeshStandardMaterial( { color: 0x0000ff } ) );
-sphere3.position.set(3, 3, 0);
-sphere3.castShadow = true;
-scene.add( sphere3 );
-
 
 const controls = new OrbitControls( camera, canvas );
 
@@ -68,6 +71,9 @@ renderer.setSize( sizes.width, sizes.height );
 function animate() {
     requestAnimationFrame( animate );
     controls.update();
+    camera.position.x += speed;
+    camera.position.x %= loopLength;
+    camera.lookAt(0, 0, 0);
     renderer.render( scene, camera );
 }
 
