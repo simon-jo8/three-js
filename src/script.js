@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 const scene = new THREE.Scene();
+scene.background = new THREE.Color( 0xF5F5DC );
 const sizes = {
     width: window.innerWidth,
     height: window.innerHeight
@@ -94,6 +95,12 @@ renderer.setSize( sizes.width, sizes.height );
 // Animate
 function animate() {
     requestAnimationFrame( animate );
+
+    sphere1.rotation.x += 0.01;
+    sphere1.rotation.y += 0.01;
+
+    sphere3.rotation.x += 0.01;
+    sphere3.rotation.y += 0.01;
     controls.update();
     renderer.render( scene, camera );
 }
