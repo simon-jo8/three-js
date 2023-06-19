@@ -1,5 +1,12 @@
 import * as THREE from 'three';
+import { IcosahedronGeometry, MeshLambertMaterial, Mesh, Object3D, Vector3 } from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+
+
+import { createNoise3D } from 'simplex-noise';
+const noise3D = createNoise3D();
+
+const { random, PI } = Math;
 
 const scene = new THREE.Scene();
 const sizes = {
@@ -8,6 +15,8 @@ const sizes = {
 }
 const canvas = document.querySelector('#three');
 
+const planet = new Object3D();
+scene.add(planet);
 // LIGHT
 var ambientLight = new THREE.AmbientLight( 0x404040 ); // soft white light
 scene.add( ambientLight );
@@ -26,35 +35,62 @@ camera.lookAt(0, 0, 0);
 
 
 
-// Plane
-var geometry = new THREE.PlaneGeometry( 10, 10 );
-var material = new THREE.MeshStandardMaterial( { color: 0x00ff00, side: THREE.DoubleSide } );
-var plane = new THREE.Mesh( geometry, material );
-plane.receiveShadow = true; // enable shadow for the plane
-plane.rotation.x = Math.PI / 2;
+// planet geometry
+const noises = [];
+
+const noiseF = 0.015;
+const noiseD = 15;
+const noiseWaterTreshold = 0.4;
+const noiseWaterLevel = 0.2;
+
+const vNoise = (v, f, i) => {
+    const nv = v.clone().multiplyScalar(f);
+    let noise = (noise3D(nv.x, nv.y, nv.z) + 1) / 2;
+    noise = (noise > noiseWaterTreshold) ? noise : noiseWaterLevel;
+    if (Number.isInteger(i)) noises[i] = noise;
+    return noise;
+};
+
+const dispV = (v, i) => {
+    const dv = v.clone();
+    dv.add(v.clone().normalize().multiplyScalar(vNoise(dv, noiseF, i) * noiseD));
+    v.x = dv.x; v.y = dv.y; v.z = dv.z;
+};
+
+let geometry = new THREE.IcosahedronGeometry(100, 4);
+const positionAttribute = geometry.getAttribute('position');
+
+let position3D = new THREE.Vector3();
+
+geometry.setAttribute( 'color', new THREE.BufferAttribute( new Float32Array( positionAttribute.count * 3 ), 3 ) );
+
+const colorAttribute = geometry.getAttribute('color');
+const landColor = new THREE.Color(0x417B2B);
+const waterColor = new THREE.Color(0x2080D0);
+
+for (let i = 0; i < positionAttribute.count; i++) {
+    position3D.fromBufferAttribute(positionAttribute, i);
+    dispV(position3D, i);
+    positionAttribute.setXYZ(i, position3D.x, position3D.y, position3D.z);
+
+    if (noises[i] == noiseWaterLevel) {
+        colorAttribute.setXYZ(i, waterColor.r, waterColor.g, waterColor.b);
+    } else {
+        colorAttribute.setXYZ(i, landColor.r, landColor.g, landColor.b);
+    }
+}
+
+geometry.computeVertexNormals();
+
+let material = new THREE.MeshLambertMaterial({color: 0xffffff, vertexColors: true, flatShading: true});
+
+let mesh = new THREE.Mesh(geometry, material);
 
 
-scene.add( plane );
+// Color adjustment will be complex due to BufferGeometry format, for now, we just give it a single color.
+// For a more detailed implementation, custom shaders or a second geometry might be needed.
 
-// SPHERE
-
-var sphereGeometry = new THREE.SphereGeometry( 1, 32, 32 );
-
-var sphere1 = new THREE.Mesh( sphereGeometry, new THREE.MeshStandardMaterial( { color: 0xff0000 } ) );
-sphere1.position.set(-3, 2, 0);
-sphere1.castShadow = true;
-scene.add( sphere1 );
-
-var sphere2 = new THREE.Mesh( sphereGeometry, new THREE.MeshStandardMaterial( { color: 0x00ff00 } ) );
-sphere2.position.set(0, 1, 0);
-sphere2.castShadow = true;
-scene.add( sphere2 );
-
-var sphere3 = new THREE.Mesh( sphereGeometry, new THREE.MeshStandardMaterial( { color: 0x0000ff } ) );
-sphere3.position.set(3, 3, 0);
-sphere3.castShadow = true;
-scene.add( sphere3 );
-
+planet.add(mesh);
 
 const controls = new OrbitControls( camera, canvas );
 
