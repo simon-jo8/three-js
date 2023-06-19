@@ -101,6 +101,7 @@ function animate() {
 
     sphere3.rotation.x += 0.01;
     sphere3.rotation.y += 0.01;
+
     controls.update();
     renderer.render( scene, camera );
 }
