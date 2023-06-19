@@ -96,6 +96,7 @@ renderer.setSize( sizes.width, sizes.height );
 function animate() {
     requestAnimationFrame( animate );
 
+
     sphere1.rotation.x += 0.01;
     sphere1.rotation.y += 0.01;
 
