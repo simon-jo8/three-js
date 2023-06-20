@@ -15,7 +15,12 @@ import {RGBELoader} from 'three/examples/jsm/loaders/RGBELoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import * as BufferGeometryUtils  from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { createNoise2D } from 'simplex-noise';
-let noise2D = createNoise2D();
+import alea from 'alea';
+const seed = alea('seed');
+let noise2D = createNoise2D(seed);
+import vertex from "./shaders/vertex.glsl"
+import fragment from "./shaders/fragment.glsl"
+
 
 
 const scene = new THREE.Scene();
@@ -24,11 +29,16 @@ const sizes = {
     width: window.innerWidth,
     height: window.innerHeight
 }
+const axesHelper = new THREE.AxesHelper( 5 );
+scene.add( axesHelper );
 const max_height = 5;
 const water_height = 0.5;
 const sand_height = 0.5;
+let circleCenter = new THREE.Vector2(0, 0); // adjust as needed
+let circleRadius = 4; // adjust as needed
 
 const canvas = document.querySelector('#three');
+
 
 // RENDERER
 const renderer = new THREE.WebGLRenderer({
@@ -71,6 +81,62 @@ var camera = new THREE.PerspectiveCamera( 45, window.innerWidth / window.innerHe
 camera.position.set(0, 10, 10);
 // camera.lookAt(0, 0, 0);
 
+
+// Portal
+let cube;
+
+const points = [];
+
+for ( let deg = 0; deg <= 180; deg += 6 ) {
+
+    const rad = Math.PI * deg / 180;
+    const point = new THREE.Vector2( ( 0.72 + .08 * Math.cos( rad ) ) * Math.sin( rad ), - Math.cos( rad ) ); // the "egg equation"
+    points.push( point );
+
+}
+
+const portalGeometry = new THREE.LatheGeometry( points, 32 );
+var portalMaterial = new THREE.ShaderMaterial({
+    vertexShader: vertex,
+    fragmentShader: fragment,
+    side: THREE.DoubleSide,
+    uniforms: {
+        color1: {
+            type: 'c',
+            value: new THREE.Color(0x9c00ff)
+        },
+        color2: {
+            type: 'c',
+            value: new THREE.Color(0x320088)
+        },
+        glowIntensity: {
+            type: 'f',
+            value: 0.6
+        }
+    },
+    wireframe: false,
+});
+// Inside your regenerateTerrain function, after creating the sandMesh:
+cube = new THREE.Mesh(portalGeometry, portalMaterial);
+let randomPosition;
+let height;
+
+do {
+    let randomX = Math.floor(Math.random() * 21) - 10; // random between -10 and 10
+    let randomY = Math.floor(Math.random() * 21) - 10; // random between -10 and 10
+    randomPosition = new THREE.Vector2(randomX, randomY);
+    let noise = (noise2D(randomPosition.x * 0.8, randomPosition.y * 0.8) +1) * 0.35;
+    height = Math.pow(noise, 2) * max_height;
+} while(height <= sand_height || randomPosition.distanceTo(circleCenter) > 2);
+
+let position = tilePosition(randomPosition.x, randomPosition.y);
+cube.position.set(position.x, position.y, position.z);
+
+// You don't need to recalculate height here because it already has the correct value
+cube.position.y = height + 0.25;
+
+scene.add(cube);
+
 // Perso
 let boxGeometry = new THREE.BoxGeometry(0.5, 0.5, 0.5);
 let boxMaterial = new THREE.MeshBasicMaterial({color: 0x00ff00});  // Green
@@ -78,39 +144,55 @@ let box = new THREE.Mesh(boxGeometry, boxMaterial);
 scene.add(box);
 let boxPosition = new THREE.Vector2(0, 0);
 
-// 2. Add keyboard controls
-window.addEventListener('keydown', function(event) {
-    let potentialPosition = boxPosition.clone(); // Potential new position
 
-    // Calculate new position based on key press
+
+window.addEventListener('keydown', function(event) {
+
+
+    let potentialPositions = [];
+    let xOffset = boxPosition.y % 2 == 0 ? 1 : -1;
+    console.log(xOffset)
+    console.log(boxPosition)
+
+    // Calculate new positions based on key press
     switch (event.code) {
         case 'ArrowUp':
-            potentialPosition.y -= 1;
+            potentialPositions.push([boxPosition.clone().add(new THREE.Vector2(0, -1)), 1]); // Up, priority 1
+            potentialPositions.push([boxPosition.clone().add(new THREE.Vector2(xOffset, -1)), 2]); // Up-Right if even row, Up-Left if odd row, priority 2
             break;
         case 'ArrowDown':
-            potentialPosition.y += 1;
+            potentialPositions.push([boxPosition.clone().add(new THREE.Vector2(0, 1)), 1]); // Down, priority 1
+            potentialPositions.push([boxPosition.clone().add(new THREE.Vector2(xOffset, 1)), 2]); // Down-Right if even row, Down-Left if odd row, priority 2
             break;
         case 'ArrowLeft':
-            potentialPosition.x -= 1;
+            potentialPositions.push([boxPosition.clone().add(new THREE.Vector2(-1, 0)), 1]); // Left, priority 1
             break;
         case 'ArrowRight':
-            potentialPosition.x += 1;
+            potentialPositions.push([boxPosition.clone().add(new THREE.Vector2(1, 0)), 1]); // Right, priority 1
             break;
     }
+    console.log(potentialPositions)
 
-    if (potentialPosition.length() > 5) { // 5 is the radius of your circle
-        return; // Do not update boxPosition if new position is outside circle
+    potentialPositions = potentialPositions.map(([pos, priority]) => {
+        let noise = (noise2D(pos.x * 0.8, pos.y * 0.8) + 1) * 0.35;
+        let height = Math.pow(noise, 2) * max_height;
+        let canMove = height > sand_height;
+        return [pos, priority, canMove];
+    }).filter(([_, __, canMove]) => canMove);
+
+    potentialPositions.sort((a, b) => a[1] - b[1]);
+
+    if(potentialPositions.length > 0) {
+        let potentialPosition = potentialPositions[0][0];
+        if(potentialPosition.distanceTo(circleCenter) < circleRadius) {
+            boxPosition = potentialPosition;
+        }
+        if(boxPosition.equals(randomPosition)) {
+            regenerateTerrain();
+        }
     }
-
-    // Check if new tile is water or not
-    let noise = (noise2D(potentialPosition.x * 0.8, potentialPosition.y * 0.8) +1) * 0.35;
-    let height = Math.pow(noise, 2) * max_height;
-
-    if(height > sand_height) { // Only move if the tile is not water
-        boxPosition = potentialPosition;
-    }
+    console.log(boxPosition)
 });
-
 
 // Case
 
@@ -144,8 +226,6 @@ function makeHex(height, position) {
 
     caseGeometry = BufferGeometryUtils.mergeBufferGeometries([caseGeometry, geometry], false);
 }
-
-
 
 function hexMesh(geometry, material) {
     let mat = new THREE.MeshPhysicalMaterial(
@@ -194,8 +274,7 @@ function animate() {
     // Adjust height based on the height of the current tile
     let noise = (noise2D(boxPosition.x * 0.8, boxPosition.y * 0.8) +1) * 0.35;
     let height = Math.pow(noise, 2) * max_height;
-    box.position.y = height;
-
+    box.position.y = height + 0.25;
     controls.update();
     renderer.render( scene, camera );
 }
@@ -211,7 +290,7 @@ function animateGrowth() {
 }
 function regenerateTerrain() {
     // Remove old meshes from the scene
-    scene.remove(sandMesh, waterMesh);
+    scene.remove(sandMesh, waterMesh, cube);
 
     // Clear old geometries
     caseGeometry.dispose();
@@ -221,7 +300,6 @@ function regenerateTerrain() {
     // Generate a new seed for the noise function
     const newSeed = Math.random;
     noise2D = createNoise2D(newSeed);
-
 
     // Create new empty geometries
     caseGeometry = new THREE.CylinderGeometry(0, 0, 0, 6);
@@ -246,9 +324,34 @@ function regenerateTerrain() {
     // Re-add them to the scene
     scene.add(sandMesh, waterMesh);
 
+    // Create a new cube with a random position
+    cube = new THREE.Mesh(portalGeometry, portalMaterial);
+    let cubePosition, height;
+    do {
+        let randomX = Math.floor(Math.random() * 21) - 10; // random between -10 and 10
+        let randomY = Math.floor(Math.random() * 21) - 10; // random between -10 and 10
+        cubePosition = new THREE.Vector2(randomX, randomY);
+        let noise = (noise2D(cubePosition.x * 0.8, cubePosition.y * 0.8) +1) * 0.35;
+        height = Math.pow(noise, 2) * max_height;
+    } while(height <= sand_height || cubePosition.distanceTo(circleCenter) > 2);
+    let position = tilePosition(cubePosition.x, cubePosition.y);
+    randomPosition = cubePosition;
+    cube.position.set(position.x, height + 0.25, position.z);
+    scene.add(cube);
+
+    // Place the box on a random position on a sand tile
+    do {
+        let randomX = Math.floor(Math.random() * 21) - 10; // random between -10 and 10
+        let randomY = Math.floor(Math.random() * 21) - 10; // random between -10 and 10
+        boxPosition = new THREE.Vector2(randomX, randomY);
+        let noise = (noise2D(boxPosition.x * 0.8, boxPosition.y * 0.8) +1) * 0.35;
+        height = Math.pow(noise, 2) * max_height;
+    } while(height <= sand_height || boxPosition.distanceTo(circleCenter) > 2);
+
     // Begin animation
     animateGrowth();
 }
+
 
 document.addEventListener('keydown', function(event) {
     if (event.code === 'Space') {
