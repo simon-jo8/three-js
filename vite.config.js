@@ -1,4 +1,6 @@
 const isCodeSandbox = 'SANDBOX_URL' in process.env || 'CODESANDBOX_HOST' in process.env
+import vitePluginString from 'vite-plugin-string'
+
 
 export default {
     root: 'src/',
@@ -14,5 +16,8 @@ export default {
         outDir: '../dist',
         emptyOutDir: true,
         sourcemap: true
-    }
+    },
+    plugins: [
+        vitePluginString()
+    ]
 }
