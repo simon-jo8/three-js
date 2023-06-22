@@ -1,5 +1,14 @@
-varying vec3 vNormal;
+uniform float time;
+uniform float amplitude;
+uniform float frequency;
+uniform float phase;
+
+varying vec3 vPosition;  // Declare vPosition varying
+
 void main() {
-    vNormal = normalize(normalMatrix * normal);
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    vec3 newPosition = position;
+    newPosition.z += amplitude * sin(frequency * position.z + time + phase);
+
+    vPosition = newPosition; // Pass position to fragment shader
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(newPosition, 1.0);
 }
