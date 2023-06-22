@@ -8,13 +8,17 @@ import {
     Vector3,
     Vector2,
     ACESFilmicToneMapping,
-    Color,
+    Color, AnimationMixer,
     FloatType
 } from 'three';
 import {RGBELoader} from 'three/examples/jsm/loaders/RGBELoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import * as BufferGeometryUtils  from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { createNoise2D } from 'simplex-noise';
+import {GLTFLoader} from "three/addons/loaders/GLTFLoader.js";
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import alea from 'alea';
 const seed = alea('seed');
 let noise2D = createNoise2D(seed);
@@ -24,18 +28,31 @@ import fragment from "./shaders/fragment.glsl"
 
 
 const scene = new THREE.Scene();
+let counter = 0;
 scene.background = new THREE.Color( 0xF5F5DC );
 const sizes = {
     width: window.innerWidth,
     height: window.innerHeight
 }
-const axesHelper = new THREE.AxesHelper( 5 );
-scene.add( axesHelper );
+// const axesHelper = new THREE.AxesHelper( 5 );
+// scene.add( axesHelper );
+let targetPosition = new THREE.Vector3(0,1,0); // The target position we'll move the box towards
+
 const max_height = 5;
-const water_height = 0.5;
+const water_height = 0.4;
 const sand_height = 0.5;
 let circleCenter = new THREE.Vector2(0, 0); // adjust as needed
 let circleRadius = 4; // adjust as needed
+// let terrain = [];
+let pawnPosition = {i: 0, j: 0};
+let leftTile = {i: 0, j: 0};
+let rightTile = {i: 0, j: 0};
+const params = {
+    threshold: 0,
+    strength: 1.5,
+    radius: 10,
+    exposure: 1
+};
 
 const canvas = document.querySelector('#three');
 
@@ -46,6 +63,7 @@ const renderer = new THREE.WebGLRenderer({
 }, { antialias: true });
 renderer.setPixelRatio( window.devicePixelRatio );
 renderer.toneMapping = ACESFilmicToneMapping;
+renderer.toneMappingExposure = Math.pow(params.exposure, 4.0);
 renderer.outputEncoding = THREE.sRGBEncoding;
 renderer.physicallyCorrectLights = true;
 renderer.shadowMap.enabled = true;
@@ -59,8 +77,8 @@ let envmapTexture = await new RGBELoader().setDataType(FloatType).loadAsync( 'as
 envmap = pmremGenerator.fromEquirectangular( envmapTexture ).texture;
 
 // LIGHT
-const light = new THREE.DirectionalLight( new Color( "#ffccaa").convertSRGBToLinear(), 1 );
-light.position.set(-20,30,30);
+const light = new THREE.DirectionalLight( new Color( "#ffccaa").convertSRGBToLinear(), 2 );
+light.position.set(-20,60,30);
 light.castShadow = true;
 light.shadow.radius = 3
 light.shadow.opacity = 0.001
@@ -71,53 +89,60 @@ light.shadow.camera.near = 0.5; // default
 light.shadow.camera.far = 500; // default
 scene.add( light );
 
-// const ambiantLight = new THREE.AmbientLight( new Color( "#ffffff").convertSRGBToLinear(), 0.3 );
-// ambiantLight.position.set(0, 100, 0);
-// scene.add( ambiantLight)
+const ambiantLight = new THREE.AmbientLight( new Color( "#ffffff").convertSRGBToLinear(), 0.5 );
+ambiantLight.position.set(0, 100, 0);
+scene.add( ambiantLight)
 
 
 // Camera
 var camera = new THREE.PerspectiveCamera( 45, window.innerWidth / window.innerHeight, 0.1, 1000 );
-camera.position.set(0, 10, 10);
-// camera.lookAt(0, 0, 0);
+camera.position.set(0, 20, 15);
+camera.lookAt(0, 0, 0);
 
 
+// Plane + fog
+let planeGeometry = new THREE.PlaneGeometry(1000, 1000);
+let planeMaterial = new THREE.MeshBasicMaterial({color: 0xE98F39});
+let plane = new THREE.Mesh(planeGeometry, planeMaterial);
+scene.add(plane);
+plane.rotation.x = -Math.PI / 2;
+scene.fog = new THREE.Fog(0xFAC898, 15, 100);
 // Portal
-let cube;
+let portal;
 
 const points = [];
 
 for ( let deg = 0; deg <= 180; deg += 6 ) {
 
-    const rad = Math.PI * deg / 180;
+    const rad = (Math.PI * deg / 180);
     const point = new THREE.Vector2( ( 0.72 + .08 * Math.cos( rad ) ) * Math.sin( rad ), - Math.cos( rad ) ); // the "egg equation"
     points.push( point );
 
 }
 
+var radius = 0.5;
+var segments = 64;
+var rings = 64;
+// const portalGeometry = new THREE.SphereGeometry( radius, segments, rings );
 const portalGeometry = new THREE.LatheGeometry( points, 32 );
 var portalMaterial = new THREE.ShaderMaterial({
     vertexShader: vertex,
     fragmentShader: fragment,
     side: THREE.DoubleSide,
     uniforms: {
-        color1: {
-            type: 'c',
-            value: new THREE.Color(0x9c00ff)
-        },
-        color2: {
-            type: 'c',
-            value: new THREE.Color(0x320088)
-        },
-        glowIntensity: {
-            type: 'f',
-            value: 0.6
-        }
+        color1: { type: 'c', value: new THREE.Color(0x9c00ff) },
+        color2: { type: 'c', value: new THREE.Color(0x320088) },
+        glowIntensity: { type: 'f', value: 0.6 },
+        time: { type: 'f', value: 0.0 },
+        amplitude: { type: 'f', value: 0.1 },
+        frequency: { type: 'f', value: 60.0 },
+        phase: { type: 'f', value: 0.9 }
     },
     wireframe: false,
 });
 // Inside your regenerateTerrain function, after creating the sandMesh:
-cube = new THREE.Mesh(portalGeometry, portalMaterial);
+portal = new THREE.Mesh(portalGeometry, portalMaterial);
+portal.scale.set(0.7, 0.7, 0.7);
 let randomPosition;
 let height;
 
@@ -130,69 +155,42 @@ do {
 } while(height <= sand_height || randomPosition.distanceTo(circleCenter) > 2);
 
 let position = tilePosition(randomPosition.x, randomPosition.y);
-cube.position.set(position.x, position.y, position.z);
+portal.position.set(position.x, position.y, position.z);
 
 // You don't need to recalculate height here because it already has the correct value
-cube.position.y = height + 0.25;
+portal.position.y = height + 0.25;
 
-scene.add(cube);
+scene.add(portal);
 
 // Perso
-let boxGeometry = new THREE.BoxGeometry(0.5, 0.5, 0.5);
-let boxMaterial = new THREE.MeshBasicMaterial({color: 0x00ff00});  // Green
-let box = new THREE.Mesh(boxGeometry, boxMaterial);
-scene.add(box);
-let boxPosition = new THREE.Vector2(0, 0);
+const pandaUrl = 'assets/cutepanda.glb';
+const loader = new GLTFLoader();
+let box = new THREE.Object3D();
 
+let mixer,jump,walk;
+loader.load(pandaUrl, (gltf) => {
+    box = gltf.scene;
+    box.scale.set(0.3, 0.3, 0.3);
+    box.rotation.y = Math.PI / 2;
+    scene.add(box);
+    console.log(gltf.animations)
+    mixer = new AnimationMixer(box);
+    const clips = gltf.animations;
+    const clip = THREE.AnimationClip.findByName(clips, 'Jump');
+    const clip2 = THREE.AnimationClip.findByName(clips, 'Resting2');
+    walk = mixer.clipAction(clip2);
+    walk.play()
+    jump = mixer.clipAction(clip);
+})
 
+// let boxGeometry = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+// let boxMaterial = new THREE.MeshBasicMaterial({color: 0x00ff00});  // Green
+// let box = new THREE.Mesh(boxGeometry, boxMaterial);
 
-window.addEventListener('keydown', function(event) {
-
-
-    let potentialPositions = [];
-    let xOffset = boxPosition.y % 2 == 0 ? 1 : -1;
-    console.log(xOffset)
-    console.log(boxPosition)
-
-    // Calculate new positions based on key press
-    switch (event.code) {
-        case 'ArrowUp':
-            potentialPositions.push([boxPosition.clone().add(new THREE.Vector2(0, -1)), 1]); // Up, priority 1
-            potentialPositions.push([boxPosition.clone().add(new THREE.Vector2(xOffset, -1)), 2]); // Up-Right if even row, Up-Left if odd row, priority 2
-            break;
-        case 'ArrowDown':
-            potentialPositions.push([boxPosition.clone().add(new THREE.Vector2(0, 1)), 1]); // Down, priority 1
-            potentialPositions.push([boxPosition.clone().add(new THREE.Vector2(xOffset, 1)), 2]); // Down-Right if even row, Down-Left if odd row, priority 2
-            break;
-        case 'ArrowLeft':
-            potentialPositions.push([boxPosition.clone().add(new THREE.Vector2(-1, 0)), 1]); // Left, priority 1
-            break;
-        case 'ArrowRight':
-            potentialPositions.push([boxPosition.clone().add(new THREE.Vector2(1, 0)), 1]); // Right, priority 1
-            break;
-    }
-    console.log(potentialPositions)
-
-    potentialPositions = potentialPositions.map(([pos, priority]) => {
-        let noise = (noise2D(pos.x * 0.8, pos.y * 0.8) + 1) * 0.35;
-        let height = Math.pow(noise, 2) * max_height;
-        let canMove = height > sand_height;
-        return [pos, priority, canMove];
-    }).filter(([_, __, canMove]) => canMove);
-
-    potentialPositions.sort((a, b) => a[1] - b[1]);
-
-    if(potentialPositions.length > 0) {
-        let potentialPosition = potentialPositions[0][0];
-        if(potentialPosition.distanceTo(circleCenter) < circleRadius) {
-            boxPosition = potentialPosition;
-        }
-        if(boxPosition.equals(randomPosition)) {
-            regenerateTerrain();
-        }
-    }
-    console.log(boxPosition)
-});
+// scene.add(box);
+// Set the initial position of the box (pawn).
+box.position.copy(tilePosition(pawnPosition.i, pawnPosition.j));
+box.position.y = 5;
 
 // Case
 
@@ -201,7 +199,13 @@ let sandGeometry = new THREE.CylinderGeometry(0, 0, 0, 6);
 let waterGeometry = new THREE.CylinderGeometry(0, 0, 0, 6);
 
 function tilePosition(i, j) {
-    return new Vector3((i+(j%2)*0.5)*1.77,0, j*1.535)
+    // These should be the actual size of your tiles
+    const tileWidth = 1;
+    const tileHeight = 1;
+
+    const x = (i + (j % 2) * 0.5) * tileWidth * Math.sqrt(3);
+    const z = j * 1.5 * tileHeight;
+    return new THREE.Vector3(x, 0, z);
 }
 
 let textures = {
@@ -231,7 +235,7 @@ function hexMesh(geometry, material) {
     let mat = new THREE.MeshPhysicalMaterial(
         {
             envMap: envmap,
-            envMapIntensity: 0.21,
+            envMapIntensity: 0.1,
             flatShading: true,
             map:material
         })
@@ -242,16 +246,37 @@ function hexMesh(geometry, material) {
     return mesh
 }
 
+let terrain = Array(21).fill().map(() => Array(21).fill(null));  // a 21x21 2D array
+
+
 for (let i = -10; i <= 10; i++) {
     for(let j = -10; j <= 10; j++) {
         let position = tilePosition(i, j);
         if(position.length() > 5) continue;
         let noise = (noise2D(i * 0.8, j * 0.8) +1) * 0.35;
         noise = Math.pow(noise, 2);
-        makeHex(noise * max_height, tilePosition(i, j));
-    }
+        let height = noise * max_height;
+        makeHex(height, position);
 
+        let terrainType = height >= sand_height ? 'sand' : 'water';
+        terrain[i + 10][j + 10] = {
+            i: i,
+            j: j,
+            type: terrainType,
+            neighbors: [
+                {i: i - 1, j: j},  // West
+                {i: i + 1, j: j},  // East
+                {i: i + (j % 2 == 0 ? 0 : -1), j: j - 1},  // Northwest for even j, Northeast for odd j
+                {i: i + (j % 2 == 0 ? 1 : 0), j: j - 1},  // Northeast for even j, Northwest for odd j
+                {i: i + (j % 2 == 0 ? 0 : -1), j: j + 1},  // Southwest for even j, Southeast for odd j
+                {i: i + (j % 2 == 0 ? 1 : 0), j: j + 1},  // Southeast for even j, Southwest for odd j
+            ].filter(n => n.i >= -10 && n.i <= 10 && n.j >= -10 && n.j <= 10)
+        };
+
+    }
 }
+
+
 
 let sandMesh = hexMesh(sandGeometry, textures.sand);
 let waterMesh = hexMesh(waterGeometry, textures.water);
@@ -260,37 +285,65 @@ scene.add(sandMesh,waterMesh);
 
 
 // Controls
+let composer;
 const controls = new OrbitControls( camera, canvas );
 controls.enableDamping = true;
+controls.enableZoom = false;
 controls.dampingFactor = 0.05;
+controls.maxPolarAngle = Math.PI / 3;
 controls.target.set(0, 0, 0);
 
+const renderScene = new RenderPass( scene, camera );
+
+const bloomPass = new UnrealBloomPass( new THREE.Vector2( window.innerWidth, window.innerHeight ), 1.5, 0.4, 0.85 );
+bloomPass.threshold = params.threshold;
+bloomPass.strength = params.strength;
+bloomPass.radius = params.radius;
+
+
+composer = new EffectComposer( renderer );
+composer.addPass( renderScene );
+composer.addPass( bloomPass );
+
+
 // Animate
+const clock = new THREE.Clock();
 function animate() {
     requestAnimationFrame( animate );
-    let position = tilePosition(boxPosition.x, boxPosition.y);
-    box.position.set(position.x, position.y, position.z);
+    // let position = tilePosition(boxPosition.x, boxPosition.y);
+    // box.position.set(position.x, position.y, position.z);
+    portal.material.uniforms.time.value = performance.now() * 0.01;
 
-    // Adjust height based on the height of the current tile
-    let noise = (noise2D(boxPosition.x * 0.8, boxPosition.y * 0.8) +1) * 0.35;
-    let height = Math.pow(noise, 2) * max_height;
-    box.position.y = height + 0.25;
+    box.position.lerp(targetPosition, 0.1);
+    mixer.update(clock.getDelta());
+
+    // // Adjust height based on the height of the current tile
+    // let noise = (noise2D(boxPosition.x * 0.8, boxPosition.y * 0.8) +1) * 0.35;
+    // let height = Math.pow(noise, 2) * max_height;
+    // box.position.y = height + 0.25;
     controls.update();
     renderer.render( scene, camera );
 }
 
 animate();
 
-function animateGrowth() {
+function animateGrowth(portal,heightPortal) {
     gsap.from([sandMesh.scale, waterMesh.scale], {
         duration: 2, // animation duration in seconds
         y: 0, // start value
         ease: "power2.out", // easing function to make the animation more natural
     });
+    gsap.fromTo(portal.position, {
+        y: heightPortal + 30, // start from a high position
+    }, {
+        duration: 1,
+        y: heightPortal,
+        ease: "power2.out",
+    });
 }
 function regenerateTerrain() {
     // Remove old meshes from the scene
-    scene.remove(sandMesh, waterMesh, cube);
+    scene.remove(sandMesh, waterMesh, portal);
 
     // Clear old geometries
     caseGeometry.dispose();
@@ -313,7 +366,24 @@ function regenerateTerrain() {
             if(position.length() > 5) continue;
             let noise = (noise2D(i * 0.8, j * 0.8) +1) * 0.35;
             noise = Math.pow(noise, 2);
-            makeHex(noise * max_height, tilePosition(i, j));
+            let height = noise * max_height;
+            makeHex(height, position);
+
+            let terrainType = height >= sand_height ? 'sand' : 'water';
+            terrain[i + 10][j + 10] = {
+                i: i,
+                j: j,
+                type: terrainType,
+                neighbors: [
+                    {i: i - 1, j: j},  // West
+                    {i: i + 1, j: j},  // East
+                    {i: i + (j % 2 == 0 ? 0 : -1), j: j - 1},  // Northwest for even j, Northeast for odd j
+                    {i: i + (j % 2 == 0 ? 1 : 0), j: j - 1},  // Northeast for even j, Northwest for odd j
+                    {i: i + (j % 2 == 0 ? 0 : -1), j: j + 1},  // Southwest for even j, Southeast for odd j
+                    {i: i + (j % 2 == 0 ? 1 : 0), j: j + 1},  // Southeast for even j, Southwest for odd j
+                ].filter(n => n.i >= -10 && n.i <= 10 && n.j >= -10 && n.j <= 10)
+            };
+
         }
     }
 
@@ -325,31 +395,47 @@ function regenerateTerrain() {
     scene.add(sandMesh, waterMesh);
 
     // Create a new cube with a random position
-    cube = new THREE.Mesh(portalGeometry, portalMaterial);
-    let cubePosition, height;
+    portal = new THREE.Mesh(portalGeometry, portalMaterial);
+    let portalPosition, heightPortal;
     do {
         let randomX = Math.floor(Math.random() * 21) - 10; // random between -10 and 10
         let randomY = Math.floor(Math.random() * 21) - 10; // random between -10 and 10
-        cubePosition = new THREE.Vector2(randomX, randomY);
-        let noise = (noise2D(cubePosition.x * 0.8, cubePosition.y * 0.8) +1) * 0.35;
-        height = Math.pow(noise, 2) * max_height;
-    } while(height <= sand_height || cubePosition.distanceTo(circleCenter) > 2);
-    let position = tilePosition(cubePosition.x, cubePosition.y);
-    randomPosition = cubePosition;
-    cube.position.set(position.x, height + 0.25, position.z);
-    scene.add(cube);
+        portalPosition = new THREE.Vector2(randomX, randomY);
+        let noise = (noise2D(portalPosition.x * 0.8, portalPosition.y * 0.8) +1) * 0.35;
+        heightPortal = Math.pow(noise, 2) * max_height;
+    } while(heightPortal <= sand_height || portalPosition.distanceTo(circleCenter) > 2);
+    let position = tilePosition(portalPosition.x, portalPosition.y);
+    portal.position.set(position.x, height + 50, position.z);
+    portal.scale.set(0.7, 0.7, 0.7);
+    scene.add(portal);
 
-    // Place the box on a random position on a sand tile
-    do {
-        let randomX = Math.floor(Math.random() * 21) - 10; // random between -10 and 10
-        let randomY = Math.floor(Math.random() * 21) - 10; // random between -10 and 10
-        boxPosition = new THREE.Vector2(randomX, randomY);
-        let noise = (noise2D(boxPosition.x * 0.8, boxPosition.y * 0.8) +1) * 0.35;
-        height = Math.pow(noise, 2) * max_height;
-    } while(height <= sand_height || boxPosition.distanceTo(circleCenter) > 2);
+    console.log(box.position);
+    let heightPerso = (noise2D(pawnPosition.i * 0.8, pawnPosition.j * 0.8) +1) * 0.35;
+    heightPerso = Math.pow(heightPerso, 2) * max_height;
+    targetPosition.y = heightPerso;
+    console.log(box.position);
 
+    if (terrain[pawnPosition.i + 10][pawnPosition.j + 10].type === 'water') {
+        console.log('Pawn is in water, moving to sand')
+        for (let di = -1; di <= 1; di++) {
+            for (let dj = -1; dj <= 1; dj++) {
+                let newI = pawnPosition.i + di;
+                let newJ = pawnPosition.j + dj;
+                if (isValidPosition(newI, newJ) && terrain[newI + 10][newJ + 10] && terrain[newI + 10][newJ + 10].type === 'sand') {
+                    pawnPosition.i = newI;
+                    pawnPosition.j = newJ;
+                    targetPosition.copy(tilePosition(newI, newJ));
+
+                    // Calculate the new height
+                    let noise = (noise2D(newI * 0.8, newJ * 0.8) +1) * 0.35;
+                    targetPosition.y = Math.pow(noise, 2) * max_height ;
+                    break;
+                }
+            }
+        }
+    }
     // Begin animation
-    animateGrowth();
+    animateGrowth(portal,heightPortal);
 }
 
 
@@ -358,6 +444,170 @@ document.addEventListener('keydown', function(event) {
         regenerateTerrain();
     }
 });
+
+function isValidPosition(i, j) {
+    return i >= -10 && i <= 10 && j >= -10 && j <= 10 ;
+}
+
+function changeTileHeight(i, j, newHeight) {
+    // Update the terrain data
+    terrain[i + 10][j + 10] = newHeight > sand_height ? 'sand' : 'water';
+
+    // Update the tile geometry
+    let position = tilePosition(i, j);
+    let geometry = hexGeometry(newHeight, position);
+    if(newHeight > sand_height) {
+        sandGeometry = BufferGeometryUtils.mergeBufferGeometries([sandGeometry, geometry], false);
+    } else {
+        let wg = hexGeometry(water_height, position);
+        waterGeometry = BufferGeometryUtils.mergeBufferGeometries([waterGeometry, wg], false);
+    }
+    caseGeometry = BufferGeometryUtils.mergeBufferGeometries([caseGeometry, geometry], false);
+
+    // Re-create and re-add the mesh to the scene
+    scene.remove(sandMesh, waterMesh);
+    sandMesh = hexMesh(sandGeometry, textures.sand);
+    waterMesh = hexMesh(waterGeometry, textures.water);
+    scene.add(sandMesh, waterMesh);
+}
+
+function updateScore() {
+    // Update the score display
+    document.getElementById('counter').innerText = 'Score: ' + counter;
+}
+
+function turnBox(direction, callback) {
+    let targetRotation = 0;
+
+    switch (direction) {
+        case 'up':
+            targetRotation = -Math.PI;
+            break;
+        case 'down':
+            targetRotation = 0;
+            break;
+        case 'left':
+            targetRotation = -Math.PI / 2;
+            break;
+        case 'right':
+            targetRotation = Math.PI / 2;
+            break;
+    }
+
+    gsap.to(box.rotation, { y: targetRotation, duration: 0.2, ease: "power2.out", onComplete: callback });
+}
+document.addEventListener('keydown', function (event) {
+    let currentTile = terrain[pawnPosition.i + 10][pawnPosition.j + 10];
+    let newTile;
+
+    function animateMove() {
+        jump.setLoop(THREE.LoopOnce);
+        jump.reset();
+        jump.play(); // play jump animation
+    setTimeout(function() {
+    // move the box
+        if (newTile && terrain[newTile.i + 10][newTile.j + 10] && terrain[newTile.i + 10][newTile.j + 10].type !== 'water') {
+            pawnPosition.i = newTile.i;
+            pawnPosition.j = newTile.j;
+
+            let newPosition = tilePosition(pawnPosition.i, pawnPosition.j);
+            targetPosition.copy(newPosition);
+
+            // Calculate the new height
+            let noise = (noise2D(newTile.i * 0.8, pawnPosition.j * 0.8) + 1) * 0.35;
+            targetPosition.y = Math.pow(noise, 2) * max_height ;
+
+            gsap.to(box.position, {duration: 1, x: targetPosition.x, y: targetPosition.y, z: targetPosition.z});
+            setTimeout(function() {
+                let distanceToPortal = targetPosition.distanceTo(portal.position);
+                if (distanceToPortal < 1) { // You might need to adjust this value depending on the sizes of the box and the portal
+                    counter++;
+                    updateScore()
+                    regenerateTerrain();
+                }
+                },500
+            )
+        }
+    }, 500);
+
+    }
+
+    switch (event.code) {
+        case 'ArrowUp':
+
+            // try moving to top right tile, if not water
+            if(currentTile.j % 2 === 0 && currentTile.j < 0 || currentTile.j % 2 === 0 && currentTile.j == 0 || currentTile.j % 2 !== 0 && currentTile.j > 0){
+                leftTile.i = currentTile.i + 0;
+                leftTile.j = currentTile.j - 1;
+                rightTile.i = currentTile.i + 1;
+                rightTile.j = currentTile.j - 1;
+            }else{
+                leftTile.i = currentTile.i - 1;
+                leftTile.j = currentTile.j - 1;
+                rightTile.i = currentTile.i + 0;
+                rightTile.j = currentTile.j - 1;
+            }
+            if (terrain[leftTile.i + 10][leftTile.j + 10] && terrain[leftTile.i + 10][leftTile.j + 10].type === 'water') {
+                            // if top right is water, try top left
+                            newTile = rightTile;
+            }else if(!terrain[leftTile.i + 10][leftTile.j + 10]){
+                newTile = rightTile;
+            }else{
+                newTile = leftTile;
+            }
+
+            turnBox('up', animateMove);
+            break;
+        case 'ArrowDown':
+
+            // try moving to bottom right tile, if not water
+            if(currentTile.j % 2 === 0 && currentTile.j > 0 || currentTile.j % 2 === 0 && currentTile.j == 0 || currentTile.j % 2 !== 0 && currentTile.j < 0){
+                leftTile.i = currentTile.i - 1;
+                leftTile.j = currentTile.j + 1;
+                rightTile.i = currentTile.i + 0;
+                rightTile.j = currentTile.j + 1;
+            }else{
+                leftTile.i = currentTile.i + 0;
+                leftTile.j = currentTile.j + 1;
+                rightTile.i = currentTile.i + 1;
+                rightTile.j = currentTile.j + 1;
+            }
+            console.log(leftTile)
+            console.log(rightTile)
+            console.log(terrain[leftTile.i + 10][leftTile.j + 10])
+            if (terrain[leftTile.i + 10][leftTile.j + 10] && terrain[leftTile.i + 10][leftTile.j + 10].type === 'water') {
+                // if top right is water, try top left
+                newTile = rightTile;
+            }else if(!terrain[leftTile.i + 10][leftTile.j + 10]){
+                newTile = rightTile;
+            }else{
+                newTile = leftTile;
+            }
+            turnBox('down', animateMove);
+            break;
+        case 'ArrowLeft':
+
+            newTile = currentTile.neighbors[0];
+            turnBox('left', animateMove);
+            break;
+        case 'ArrowRight':
+
+            newTile = currentTile.neighbors[1];
+            turnBox('right', animateMove);
+            break;
+    }
+
+});
+
+window.addEventListener('resize', function(){
+    // assuming you are using three.js and renderer is your THREE.WebGLRenderer
+    renderer.setSize(window.innerWidth, window.innerHeight);
+
+    // if you have a camera, you might also want to adjust its aspect ratio
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+});
+
 
 
 
