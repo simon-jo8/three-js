@@ -1,12 +1,6 @@
 import * as THREE from 'three';
 import { gsap } from 'gsap';
 import {
-    IcosahedronGeometry,
-    MeshLambertMaterial,
-    Mesh,
-    Object3D,
-    Vector3,
-    Vector2,
     ACESFilmicToneMapping,
     Color, AnimationMixer,
     FloatType
@@ -16,15 +10,15 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import * as BufferGeometryUtils  from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { createNoise2D } from 'simplex-noise';
 import {GLTFLoader} from "three/addons/loaders/GLTFLoader.js";
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+
 import alea from 'alea';
 const seed = alea('seed');
 let noise2D = createNoise2D(seed);
 import vertex from "./shaders/vertex.glsl"
 import fragment from "./shaders/fragment.glsl"
 
+
+(async function(){
 
 
 const scene = new THREE.Scene();
@@ -76,6 +70,7 @@ let pmremGenerator = new THREE.PMREMGenerator( renderer );
 let envmapTexture = await new RGBELoader().setDataType(FloatType).loadAsync( 'assets/desert.hdr' );
 envmap = pmremGenerator.fromEquirectangular( envmapTexture ).texture;
 
+
 // LIGHT
 const light = new THREE.DirectionalLight( new Color( "#ffccaa").convertSRGBToLinear(), 2 );
 light.position.set(-20,60,30);
@@ -107,23 +102,21 @@ let plane = new THREE.Mesh(planeGeometry, planeMaterial);
 scene.add(plane);
 plane.rotation.x = -Math.PI / 2;
 scene.fog = new THREE.Fog(0xFAC898, 15, 100);
+
+
+
+
 // Portal
 let portal;
 
 const points = [];
 
 for ( let deg = 0; deg <= 180; deg += 6 ) {
-
     const rad = (Math.PI * deg / 180);
     const point = new THREE.Vector2( ( 0.72 + .08 * Math.cos( rad ) ) * Math.sin( rad ), - Math.cos( rad ) ); // the "egg equation"
     points.push( point );
-
 }
 
-var radius = 0.5;
-var segments = 64;
-var rings = 64;
-// const portalGeometry = new THREE.SphereGeometry( radius, segments, rings );
 const portalGeometry = new THREE.LatheGeometry( points, 32 );
 var portalMaterial = new THREE.ShaderMaterial({
     vertexShader: vertex,
@@ -293,34 +286,15 @@ controls.dampingFactor = 0.05;
 controls.maxPolarAngle = Math.PI / 3;
 controls.target.set(0, 0, 0);
 
-const renderScene = new RenderPass( scene, camera );
-
-const bloomPass = new UnrealBloomPass( new THREE.Vector2( window.innerWidth, window.innerHeight ), 1.5, 0.4, 0.85 );
-bloomPass.threshold = params.threshold;
-bloomPass.strength = params.strength;
-bloomPass.radius = params.radius;
-
-
-composer = new EffectComposer( renderer );
-composer.addPass( renderScene );
-composer.addPass( bloomPass );
 
 
 // Animate
 const clock = new THREE.Clock();
 function animate() {
     requestAnimationFrame( animate );
-    // let position = tilePosition(boxPosition.x, boxPosition.y);
-    // box.position.set(position.x, position.y, position.z);
     portal.material.uniforms.time.value = performance.now() * 0.01;
-
-    box.position.lerp(targetPosition, 0.1);
+    // box.position.lerp(targetPosition, 0.1);
     mixer.update(clock.getDelta());
-
-    // // Adjust height based on the height of the current tile
-    // let noise = (noise2D(boxPosition.x * 0.8, boxPosition.y * 0.8) +1) * 0.35;
-    // let height = Math.pow(noise, 2) * max_height;
-    // box.position.y = height + 0.25;
     controls.update();
     renderer.render( scene, camera );
 }
@@ -409,11 +383,12 @@ function regenerateTerrain() {
     portal.scale.set(0.7, 0.7, 0.7);
     scene.add(portal);
 
-    console.log(box.position);
     let heightPerso = (noise2D(pawnPosition.i * 0.8, pawnPosition.j * 0.8) +1) * 0.35;
     heightPerso = Math.pow(heightPerso, 2) * max_height;
     targetPosition.y = heightPerso;
-    console.log(box.position);
+    gsap.to(box.position, {duration: 1, x: targetPosition.x, y: targetPosition.y, z: targetPosition.z});
+
+
 
     if (terrain[pawnPosition.i + 10][pawnPosition.j + 10].type === 'water') {
         console.log('Pawn is in water, moving to sand')
@@ -429,6 +404,8 @@ function regenerateTerrain() {
                     // Calculate the new height
                     let noise = (noise2D(newI * 0.8, newJ * 0.8) +1) * 0.35;
                     targetPosition.y = Math.pow(noise, 2) * max_height ;
+                    gsap.to(box.position, {duration: 1, x: targetPosition.x, y: targetPosition.y, z: targetPosition.z});
+
                     break;
                 }
             }
@@ -448,29 +425,6 @@ document.addEventListener('keydown', function(event) {
 function isValidPosition(i, j) {
     return i >= -10 && i <= 10 && j >= -10 && j <= 10 ;
 }
-
-function changeTileHeight(i, j, newHeight) {
-    // Update the terrain data
-    terrain[i + 10][j + 10] = newHeight > sand_height ? 'sand' : 'water';
-
-    // Update the tile geometry
-    let position = tilePosition(i, j);
-    let geometry = hexGeometry(newHeight, position);
-    if(newHeight > sand_height) {
-        sandGeometry = BufferGeometryUtils.mergeBufferGeometries([sandGeometry, geometry], false);
-    } else {
-        let wg = hexGeometry(water_height, position);
-        waterGeometry = BufferGeometryUtils.mergeBufferGeometries([waterGeometry, wg], false);
-    }
-    caseGeometry = BufferGeometryUtils.mergeBufferGeometries([caseGeometry, geometry], false);
-
-    // Re-create and re-add the mesh to the scene
-    scene.remove(sandMesh, waterMesh);
-    sandMesh = hexMesh(sandGeometry, textures.sand);
-    waterMesh = hexMesh(waterGeometry, textures.water);
-    scene.add(sandMesh, waterMesh);
-}
-
 function updateScore() {
     // Update the score display
     document.getElementById('counter').innerText = 'Score: ' + counter;
@@ -496,6 +450,7 @@ function turnBox(direction, callback) {
 
     gsap.to(box.rotation, { y: targetRotation, duration: 0.2, ease: "power2.out", onComplete: callback });
 }
+
 document.addEventListener('keydown', function (event) {
     let currentTile = terrain[pawnPosition.i + 10][pawnPosition.j + 10];
     let newTile;
@@ -534,7 +489,6 @@ document.addEventListener('keydown', function (event) {
 
     switch (event.code) {
         case 'ArrowUp':
-
             // try moving to top right tile, if not water
             if(currentTile.j % 2 === 0 && currentTile.j < 0 || currentTile.j % 2 === 0 && currentTile.j == 0 || currentTile.j % 2 !== 0 && currentTile.j > 0){
                 leftTile.i = currentTile.i + 0;
@@ -555,11 +509,9 @@ document.addEventListener('keydown', function (event) {
             }else{
                 newTile = leftTile;
             }
-
             turnBox('up', animateMove);
             break;
         case 'ArrowDown':
-
             // try moving to bottom right tile, if not water
             if(currentTile.j % 2 === 0 && currentTile.j > 0 || currentTile.j % 2 === 0 && currentTile.j == 0 || currentTile.j % 2 !== 0 && currentTile.j < 0){
                 leftTile.i = currentTile.i - 1;
@@ -608,6 +560,6 @@ window.addEventListener('resize', function(){
     camera.updateProjectionMatrix();
 });
 
-
+}());
 
 
